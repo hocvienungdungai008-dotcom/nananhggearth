@@ -16,16 +16,14 @@ if 'last_pixel' not in st.session_state:
 if 'input_string' not in st.session_state:
     st.session_state['input_string'] = ""
 if 'ui_msg' not in st.session_state:
-    st.session_state['ui_msg'] = None # Biến để hiển thị thông báo lỗi/thành công
+    st.session_state['ui_msg'] = None
 
 # ==========================================
 # HÀM XỬ LÝ DỮ LIỆU TỌA ĐỘ (CALLBACK)
 # ==========================================
 def process_add_point():
-    # Reset thông báo cũ
     st.session_state['ui_msg'] = None 
     
-    # Kiểm tra điều kiện
     if st.session_state['last_pixel'] is None:
         st.session_state['ui_msg'] = ("error", "⚠️ Hãy click chọn điểm trên ảnh ở màn hình chính trước!")
         return
@@ -35,7 +33,6 @@ def process_add_point():
         st.session_state['ui_msg'] = ("error", "⚠️ Hãy dán tọa độ vào ô trống!")
         return
 
-    # Thuật toán bóc tách tọa độ
     lng, lat = None, None
     match_lng = re.search(r"lng:\s*['\"]?([\d.]+)['\"]?", text)
     match_lat = re.search(r"lat:\s*['\"]?([\d.]+)['\"]?", text)
@@ -49,7 +46,6 @@ def process_add_point():
             lng = float(nums[0])
             lat = float(nums[1])
             
-    # Xử lý kết quả
     if lng is None or lat is None:
         st.session_state['ui_msg'] = ("error", "❌ Không thể đọc được tọa độ từ chuỗi bạn dán. Vui lòng kiểm tra lại định dạng!")
     else:
@@ -58,9 +54,14 @@ def process_add_point():
             'Pixel_X': px, 'Pixel_Y': py, 'Kinh độ': lng, 'Vĩ độ': lat
         })
         
-        # --- RESET DỮ LIỆU AN TOÀN TRONG CALLBACK ---
-        st.session_state['last_pixel'] = None # Hủy chọn mốc trên ảnh
-        st.session_state['input_string'] = "" # Xóa trắng ô dán chữ (Lúc này widget chưa load nên không bị lỗi)
+        st.session_state['last_pixel'] = None 
+        st.session_state['input_string'] = "" 
+
+def clear_all():
+    st.session_state['gcp_list'] = []
+    st.session_state['last_pixel'] = None
+    st.session_state['input_string'] = ""
+    st.session_state['ui_msg'] = None
 
 # ==========================================
 # KHU VỰC 1: THANH BÊN (SIDEBAR) - BẢNG ĐIỀU KHIỂN
@@ -80,13 +81,10 @@ with st.sidebar:
         st.subheader("2. Nhập Tọa độ Thực tế")
         st.caption("Dán nguyên chuỗi copy từ hệ thống vào đây (VD: Tọa độ: (lng: '105.9...',lat:'10.08...'))")
         
-        # Ô nhập liệu
         st.text_area("Chuỗi tọa độ:", key="input_string", height=100)
         
-        # Nút bấm GỌI HÀM CALLBACK (on_click)
         st.button("➕ Thêm điểm mốc này", type="primary", use_container_width=True, on_click=process_add_point)
         
-        # Hiển thị thông báo (nếu có lỗi từ hàm callback truyền ra)
         if st.session_state['ui_msg']:
             msg_type, msg_text = st.session_state['ui_msg']
             if msg_type == "error": st.error(msg_text)
@@ -96,10 +94,6 @@ with st.sidebar:
         st.subheader(f"3. Danh sách mốc ({len(st.session_state['gcp_list'])} điểm)")
         if st.session_state['gcp_list']:
             st.dataframe(st.session_state['gcp_list'], hide_index=True) 
-            
-            # Hàm xóa toàn bộ
-            def clear_all():
-                st.session_state['gcp_list'] = []
             st.button("🗑️ Xóa toàn bộ", use_container_width=True, on_click=clear_all)
 
 # ==========================================
@@ -144,12 +138,17 @@ else:
                     ds = gdal.Open(img_path)
                     
                     vrt_path = '/vsimem/temp.vrt'
-                    vrt = gdal.Translate(vrt_path, ds, format='VRT', GCPs=gcps, outputSRS=srs.ExportToWkt())
                     
-                    gdal.Warp(output_tif, vrt, format='GTiff', polynomialOrder=1, dstSRS='EPSG:4326')
+                    vrt_ds = gdal.Translate(vrt_path, ds, format='VRT', GCPs=gcps, outputSRS=srs.ExportToWkt())
                     
-                    vrt = None
+                    vrt_ds = None 
                     ds = None
+                    
+                    warp_opts = gdal.WarpOptions(format='GTiff', dstSRS='EPSG:4326', tps=True)
+                    out_ds = gdal.Warp(output_tif, vrt_path, options=warp_opts)
+                    
+                    out_ds = None
+                    
                     gdal.Unlink(vrt_path)
                     
                     st.success("🎉 Đã tạo file GeoTIFF thành công!")
