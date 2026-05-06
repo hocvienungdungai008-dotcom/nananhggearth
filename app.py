@@ -34,6 +34,7 @@ def process_add_point():
         return
 
     lng, lat = None, None
+    # Tìm tọa độ tự động (hoạt động với mọi định dạng có chứa từ khóa lng, lat)
     match_lng = re.search(r"lng:\s*['\"]?([\d.]+)['\"]?", text)
     match_lat = re.search(r"lat:\s*['\"]?([\d.]+)['\"]?", text)
     
@@ -41,6 +42,7 @@ def process_add_point():
         lng = float(match_lng.group(1))
         lat = float(match_lat.group(1))
     else:
+        # Dự phòng nếu chỉ có số
         nums = re.findall(r"\d+\.\d+", text)
         if len(nums) >= 2:
             lng = float(nums[0])
@@ -121,12 +123,15 @@ else:
 
     st.divider()
     
-    # 4. Xuất File GDAL WARP
+    # ==========================================
+    # 4. XUẤT FILE GDAL WARP (FIX LỖI C++ VỚI FILE VẬT LÝ)
+    # ==========================================
     if len(st.session_state['gcp_list']) >= 3:
         if st.button("🚀 XUẤT FILE GEOTIFF ĐỂ XEM TRÊN GOOGLE EARTH", type="primary", use_container_width=True):
             try:
                 with st.spinner("Đang xử lý nắn ảnh bằng GDAL..."):
                     output_tif = "output_map.tif"
+                    temp_tif = "temp_gcp.tif" # Sử dụng file vật lý để an toàn trên Linux
 
                     gcps = []
                     for p in st.session_state['gcp_list']:
@@ -134,22 +139,19 @@ else:
 
                     srs = osr.SpatialReference()
                     srs.ImportFromEPSG(4326)
+                    srs_wkt = srs.ExportToWkt()
 
+                    # Bước 1: Gắn GCPs vào file TIF tạm
                     ds = gdal.Open(img_path)
+                    gdal.Translate(temp_tif, ds, GCPs=gcps, outputSRS=srs_wkt)
+                    ds = None # Cực kỳ quan trọng để nhả file
                     
-                    vrt_path = '/vsimem/temp.vrt'
+                    # Bước 2: Nắn ảnh bằng Thin Plate Spline (tps=True) cho độ chính xác cao nhất
+                    gdal.Warp(output_tif, temp_tif, format='GTiff', dstSRS='EPSG:4326', tps=True)
                     
-                    vrt_ds = gdal.Translate(vrt_path, ds, format='VRT', GCPs=gcps, outputSRS=srs.ExportToWkt())
-                    
-                    vrt_ds = None 
-                    ds = None
-                    
-                    warp_opts = gdal.WarpOptions(format='GTiff', dstSRS='EPSG:4326', tps=True)
-                    out_ds = gdal.Warp(output_tif, vrt_path, options=warp_opts)
-                    
-                    out_ds = None
-                    
-                    gdal.Unlink(vrt_path)
+                    # Bước 3: Dọn dẹp file tạm
+                    if os.path.exists(temp_tif):
+                        os.remove(temp_tif)
                     
                     st.success("🎉 Đã tạo file GeoTIFF thành công!")
                     
